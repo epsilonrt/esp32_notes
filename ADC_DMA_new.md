@@ -274,3 +274,24 @@ void setup() {
 ```
 
 If you're on an older Arduino-ESP32 version, you can still use the I2S method, or consider upgrading to v3.x for the best experience with the continuous ADC API.
+
+## ESP32-C6 Specific Notes
+
+The ESP32-C6 reuses the same `adc_continuous` API but its hardware differs from the original ESP32 family:
+
+- Only one SAR ADC is present, so `ADC_UNIT_1` is the sole unit. Always select `ADC_CONV_SINGLE_UNIT_1`; `ADC_UNIT_2` and the alternating modes are not available.
+- The digital controller exposes 8 external channels. The default channel macros map directly to the lower GPIO numbers:
+
+```
+ADC_CHANNEL_0 -> GPIO0
+ADC_CHANNEL_1 -> GPIO1
+ADC_CHANNEL_2 -> GPIO2
+ADC_CHANNEL_3 -> GPIO3
+ADC_CHANNEL_4 -> GPIO4
+ADC_CHANNEL_5 -> GPIO5
+ADC_CHANNEL_6 -> GPIO6
+ADC_CHANNEL_7 -> GPIO7
+```
+
+- Some of these pins (for example GPIO0) are also strap pins or share functions with the USB-to-UART bridge. Plan your analog routing so you do not interfere with boot mode selection or other peripherals.
+- The legacy I2S "ADC built-in" trick is not implemented on ESP32-C6, so `adc_continuous` (or the lower-level `adc_digi` driver) is the supported path for continuous DMA capture.
