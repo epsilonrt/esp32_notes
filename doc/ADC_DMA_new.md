@@ -23,69 +23,65 @@ You can use the native ESP-IDF API in Arduino by including the appropriate heade
 The new API provides a dedicated continuous ADC mode with proper DMA support without using the I2S workaround:
 
 ```cpp
+#include <Arduino.h>
 #include "esp_adc/adc_continuous.h"
 
-#define ADC_UNIT          ADC_UNIT_1
-#define ADC_CHANNEL       ADC_CHANNEL_0  // GPIO36
-#define ADC_ATTEN         ADC_ATTEN_DB_11
-#define SAMPLE_FREQ_HZ    20000
-#define FRAME_SIZE        256
-#define CONV_MODE         ADC_CONV_SINGLE_UNIT_1
+#define ADC_CHANNEL_INDEX ADC_CHANNEL_0   // Change to the GPIO you want to sample
+#define ADC_ATTENUATION   ADC_ATTEN_DB_12 // 11 dB is deprecated in ESP-IDF 5, use 12 dB for ~3.3 V range
+#define SAMPLE_RATE_HZ    20000
+#define FRAME_LENGTH      256             // Bytes read per call (must be a multiple of SOC_ADC_DIGI_RESULT_BYTES)
+#define NUM_CHANNELS      1
 
-adc_continuous_handle_t adc_handle = NULL;
+static adc_continuous_handle_t s_adc_handle = nullptr;
+
+static void init_adc_continuous() {
+  const adc_continuous_handle_cfg_t handle_cfg = {
+    .max_store_buf_size = 1024,
+    .conv_frame_size = FRAME_LENGTH,
+  };
+  ESP_ERROR_CHECK (adc_continuous_new_handle (&handle_cfg, &s_adc_handle));
+
+  adc_digi_pattern_config_t pattern[NUM_CHANNELS] = {};
+  pattern[0].atten = ADC_ATTENUATION;
+  pattern[0].channel = ADC_CHANNEL_INDEX;
+  pattern[0].unit = ADC_UNIT_1;
+  pattern[0].bit_width = ADC_BITWIDTH_12;
+
+  const adc_continuous_config_t adc_config = {
+    .pattern_num = NUM_CHANNELS,
+    .adc_pattern = pattern,
+    .sample_freq_hz = SAMPLE_RATE_HZ,
+    .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+    .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1, // Use TYPE2 on ESP32-C6/C5 if required
+  };
+  ESP_ERROR_CHECK (adc_continuous_config (s_adc_handle, &adc_config));
+  ESP_ERROR_CHECK (adc_continuous_start (s_adc_handle));
+}
 
 void setup() {
-  Serial.begin(115200);
-  
-  // Step 1: Configure ADC continuous mode
-  adc_continuous_handle_cfg_t adc_config = {
-    .max_store_buf_size = 1024,
-    .conv_frame_size = FRAME_SIZE,
-  };
-  
-  ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
-  
-  // Step 2: Configure ADC pattern (which channels to sample)
-  adc_digi_pattern_config_t adc_pattern[1] = {0};
-  adc_pattern[0].atten = ADC_ATTEN;
-  adc_pattern[0].channel = ADC_CHANNEL;
-  adc_pattern[0].unit = ADC_UNIT;
-  adc_pattern[0].bit_width = ADC_BITWIDTH_12;
-  
-  adc_continuous_config_t dig_cfg = {
-    .pattern_num = 1,
-    .adc_pattern = adc_pattern,
-    .sample_freq_hz = SAMPLE_FREQ_HZ,
-    .conv_mode = CONV_MODE,
-    .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
-  };
-  
-  ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &dig_cfg));
-  
-  // Step 3: Start continuous conversion
-  ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+  Serial.begin (115200);
+  init_adc_continuous();
 }
 
 void loop() {
-  uint8_t result[FRAME_SIZE] = {0};
-  uint32_t ret_num = 0;
-  
-  esp_err_t ret = adc_continuous_read(adc_handle, result, FRAME_SIZE, &ret_num, 1000);
-  
+  uint8_t buffer[FRAME_LENGTH] = {0};
+  uint32_t bytes_read = 0;
+
+  const esp_err_t ret = adc_continuous_read (s_adc_handle, buffer, sizeof (buffer), &bytes_read, 100);
+
   if (ret == ESP_OK) {
-    // Process data
-    for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
-      adc_digi_output_data_t *p = (adc_digi_output_data_t*)&result[i];
-      
-      // Extract channel and data from result
-      uint32_t chan_num = p->type1.channel;
-      uint32_t data = p->type1.data;
-      
-      Serial.printf("Channel: %d, Value: %d\n", chan_num, data);
+    for (uint32_t offset = 0; offset + SOC_ADC_DIGI_RESULT_BYTES <= bytes_read; offset += SOC_ADC_DIGI_RESULT_BYTES) {
+      const adc_digi_output_data_t *sample = reinterpret_cast<const adc_digi_output_data_t *> (&buffer[offset]);
+      const uint32_t channel = sample->type1.channel;
+      const uint32_t value = sample->type1.data;
+      Serial.printf ("CH[%lu] = %lu\n", channel, value);
     }
   }
-  
-  delay(100);
+  else if (ret != ESP_ERR_TIMEOUT) {
+    Serial.printf ("adc_continuous_read failed: %s\n", esp_err_to_name (ret));
+  }
+
+  delay (100);
 }
 ```
 
