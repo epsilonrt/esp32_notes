@@ -1,0 +1,17 @@
+{
+	"folders": [
+    {
+      "path": "."
+    },
+    {
+      "path": "examples/AdcContinuousAvg"
+    },
+    {
+      "path": "examples/AdcContinuousRms"
+    },
+    {
+      "path": "examples/AdcContinuous"
+    }
+  ],
+  "settings": {}
+}
